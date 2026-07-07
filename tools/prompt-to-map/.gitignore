@@ -1,0 +1,9 @@
+# Extracted retail game assets — reproducible locally via spike/big_extract.py.
+# Not committed (EA-copyrighted; only used as local test fixtures).
+tests/fixtures/*.map
+tests/fixtures/*.big
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
