@@ -3,6 +3,9 @@
 tests/fixtures/*.map
 tests/fixtures/*.big
 
+# Derived spike output (embeds extracted map data; rebuildable from scripts)
+spike/out/
+
 # Python
 __pycache__/
 *.pyc
