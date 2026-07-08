@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
 """Build "Scorched Crossing" — the father-son 4-player map — entirely in code.
 
-Design: docs/superpowers/specs/2026-07-07-scorched-crossing-map-design.md
+v2 design (Mike's red-line sketch, 2026-07-07):
+Four elevated hill-arms flank the central road — the HIGH ROADS. Routes ramp up
+from the edge corridors, run the arm tops, and cross the river in a stacked
+diagonal X right at the center (NW<->SE high bridge over SW<->NE low bridge).
+The river runs border-to-border and drains off both map edges. Terrain is
+organically sculpted (noise + smoothing) instead of angular plateaus.
+
 Skeleton: Golden Oasis (retail) supplies the TOC, SidesList (skirmish factions +
 AI scripts), GlobalLighting and WorldInfo; terrain/objects/triggers are generated.
 
@@ -35,10 +41,10 @@ C = P // 2
 
 H_RIVER_BED = 8
 H_GROUND = 20
-H_SHELF_LOW = 36     # SW / NE shelves (the low diagonal: BL <-> TR)
-H_SHELF_HIGH = 52    # NW / SE shelves (the high diagonal: TL <-> BR)
-H_BELT = 72          # inner mountain mass
-H_RIM = 84           # outer rim plateau (helicopter-landable)
+H_BELT = 72          # the elevated hill-arms (the high roads)
+H_RIM = 84           # outer rim plateau
+H_PAD_HIGH = 80      # NW / SE bridge pads (upper deck of the X)
+H_PAD_LOW = 64       # SW / NE bridge pads (lower deck, passes underneath)
 
 RIVER_BED = (188, 212)       # x range of the river bed
 RIVER_BANK = (184, 216)      # x range including sloping banks
@@ -52,21 +58,12 @@ VALLEYS = {                  # (x0, x1, y0, y1) flat corner bases
     "TL": (40, 150, 250, 360),
     "TR": (250, 360, 250, 360),
 }
-SHELF_X_W = (158, 186)
-SHELF_X_E = (214, 242)
-SHELF_Y_N = (212, 258)
-SHELF_Y_S = (142, 188)
-SHELVES = {                  # quadrant -> (rect, height)
-    "TL": ((*SHELF_X_W, *SHELF_Y_N), H_SHELF_HIGH),
-    "SE": ((*SHELF_X_E, *SHELF_Y_S), H_SHELF_HIGH),
-    "BL": ((*SHELF_X_W, *SHELF_Y_S), H_SHELF_LOW),
-    "NE": ((*SHELF_X_E, *SHELF_Y_N), H_SHELF_LOW),
-}
-RAMPS = {                    # (x0, x1, y0, y1, h_from_x0, h_at_x1)
-    "TL": (150, 158, 228, 244, H_GROUND, H_SHELF_HIGH),
-    "BL": (150, 158, 156, 172, H_GROUND, H_SHELF_LOW),
-    "TR": (242, 250, 228, 244, H_SHELF_LOW, H_GROUND),
-    "BR": (242, 250, 156, 172, H_SHELF_HIGH, H_GROUND),
+ARM_Y = ((150, 190), (210, 250))     # the two arm bands flanking the road
+RAMP_W = (44, 84)                    # west arms ramp up here (20 -> 72)
+RAMP_E = (316, 356)                  # east arms ramp down here (72 -> 20)
+PADS = {                             # bridge feet: (x, y, height)
+    "NW": (180, 212, H_PAD_HIGH), "SE": (220, 188, H_PAD_HIGH),
+    "SW": (180, 188, H_PAD_LOW),  "NE": (220, 212, H_PAD_LOW),
 }
 WATER_Z = 7                  # world units; bed is 5.0, ground is 12.5
 
@@ -80,16 +77,13 @@ def lerp(a, b, t):
     return a + (b - a) * max(0.0, min(1.0, t))
 
 
+def in_arm_band(py):
+    return any(y0 <= py < y1 for y0, y1 in ARM_Y)
+
+
 def height_at(px, py):
-    """Target height (u8 units) for a playable-coord cell; border uses rim."""
-    if px < 0 or py < 0 or px >= P or py >= P:
-        return H_RIM
-    edge = min(px, py, P - 1 - px, P - 1 - py)
-    if edge < RIM_TOP:
-        return H_RIM
-    if edge < RIM_SLOPE:                       # steep rim face (cliff)
-        return round(lerp(H_RIM, H_GROUND, (edge - RIM_TOP) / (RIM_SLOPE - RIM_TOP)))
-    if RIVER_BANK[0] <= px < RIVER_BANK[1]:    # river canyon (before road/belt)
+    """Structural height (u8) for a cell; the river cuts through the border."""
+    if RIVER_BANK[0] <= px < RIVER_BANK[1]:    # river canyon, border-to-border
         if px < RIVER_BED[0]:
             return round(lerp(H_GROUND, H_RIVER_BED,
                               (px - RIVER_BANK[0]) / (RIVER_BED[0] - RIVER_BANK[0])))
@@ -97,22 +91,114 @@ def height_at(px, py):
             return round(lerp(H_RIVER_BED, H_GROUND,
                               (px - RIVER_BED[1] + 1) / (RIVER_BANK[1] - RIVER_BED[1])))
         return H_RIVER_BED
-    for rect, h in SHELVES.values():
-        if in_rect(px, py, rect):
+    if px < 0 or py < 0 or px >= P or py >= P:
+        return H_RIM
+    edge = min(px, py, P - 1 - px, P - 1 - py)
+    if edge < RIM_TOP:
+        return H_RIM
+    if edge < RIM_SLOPE:                       # steep rim face (cliff)
+        return round(lerp(H_RIM, H_GROUND, (edge - RIM_TOP) / (RIM_SLOPE - RIM_TOP)))
+    for x, y, h in PADS.values():              # bridge pads, blended mounds
+        d = math.hypot(px - x, py - y)
+        if d < 5:
             return h
-    for x0, x1, y0, y1, h0, h1 in RAMPS.values():
-        if x0 <= px < x1 and y0 <= py < y1:
-            return round(lerp(h0, h1, (px - x0) / (x1 - x0)))
+        if d < 14 and in_arm_band(py):
+            return round(lerp(h, H_BELT, (d - 5) / 9))
     if ROAD_Y[0] <= py < ROAD_Y[1] and CORRIDOR <= px < P - CORRIDOR:
-        return H_GROUND
+        return H_GROUND                        # the central road corridor
     if RIM_SLOPE <= px < CORRIDOR or P - CORRIDOR <= px < P - RIM_SLOPE:
         return H_GROUND                        # edge corridors
+    if in_arm_band(py):                        # ramps up onto the arms
+        if RAMP_W[0] <= px < RAMP_W[1]:
+            return round(lerp(H_GROUND, H_BELT,
+                              (px - RAMP_W[0]) / (RAMP_W[1] - RAMP_W[0])))
+        if RAMP_E[0] <= px < RAMP_E[1]:
+            return round(lerp(H_BELT, H_GROUND,
+                              (px - RAMP_E[0]) / (RAMP_E[1] - RAMP_E[0])))
     for rect in VALLEYS.values():
         if in_rect(px, py, rect):
             return H_GROUND
-    if 150 <= px < 250 or 150 <= py < 250:     # inner mountain belts
+    if 150 <= px < 250 or 150 <= py < 250:     # the hill mass (arms + core)
         return H_BELT
     return H_GROUND
+
+
+# --------------------------------------------------------------- organic pass
+START_PX = {"1": (92, 308), "2": (308, 308), "3": (308, 92), "4": (92, 92)}
+DOCK_OFFSETS = ((-34, 18), (34, -18))
+PILE_SPOTS = [(jx, jy) for jx in (28, P - 28)
+              for jy in (ROAD_Y[0] - 8, ROAD_Y[1] + 8)]
+
+
+def freedom_at(px, py):
+    """1.0 = free to sculpt organically, 0.0 = must stay exact."""
+    if RIVER_BED[0] - 2 <= px < RIVER_BED[1] + 2:
+        return 0.0                                   # keep the bed watertight
+    for x, y, _h in PADS.values():
+        if math.hypot(px - x, py - y) < 10:
+            return 0.0                               # bridge feet stay flat
+    if ROAD_Y[0] + 2 <= py < ROAD_Y[1] - 2 and CORRIDOR <= px < P - CORRIDOR:
+        return 0.0                                   # road stays drivable
+    for _q, (sx, sy) in START_PX.items():
+        if math.hypot(px - sx, py - sy) < 26:
+            return 0.0                               # bases stay buildable
+        for dx, dy in DOCK_OFFSETS:
+            if math.hypot(px - (sx + dx), py - (sy + dy)) < 8:
+                return 0.0
+    for jx, jy in PILE_SPOTS:
+        if math.hypot(px - jx, py - jy) < 6:
+            return 0.0
+    if in_arm_band(py) and (RAMP_W[0] <= px < RAMP_W[1]
+                            or RAMP_E[0] <= px < RAMP_E[1]):
+        return 0.3                                   # ramps: only gentle waves
+    edge = min(px, py, P - 1 - px, P - 1 - py) if 0 <= px < P and 0 <= py < P else -1
+    if 0 <= edge < RIM_TOP:
+        return 0.2                                   # rim stays landable
+    return 1.0
+
+
+def organic_pass(heights):
+    """Noise + smoothing: turns angular plateaus into hand-sculpted hills."""
+    rng = random.Random(7)
+    step = 8
+    gw = TOTAL // step + 2
+    coarse = [rng.uniform(-5.5, 5.5) for _ in range(gw * gw)]
+
+    def noise(x, y):
+        gx, gy = x / step, y / step
+        ix, iy = int(gx), int(gy)
+        fx, fy = gx - ix, gy - iy
+        n00 = coarse[iy * gw + ix]
+        n10 = coarse[iy * gw + ix + 1]
+        n01 = coarse[(iy + 1) * gw + ix]
+        n11 = coarse[(iy + 1) * gw + ix + 1]
+        return lerp(lerp(n00, n10, fx), lerp(n01, n11, fx), fy)
+
+    work = [float(h) for h in heights]
+    for y in range(TOTAL):
+        base = y * TOTAL
+        for x in range(TOTAL):
+            work[base + x] += noise(x, y)
+
+    for _ in range(2):                       # two 3x3 smoothing passes
+        prev = work[:]
+        for y in range(1, TOTAL - 1):
+            base = y * TOTAL
+            for x in range(1, TOTAL - 1):
+                acc = 0.0
+                for dy in (-TOTAL, 0, TOTAL):
+                    i = base + dy + x
+                    acc += prev[i - 1] + prev[i] + prev[i + 1]
+                work[base + x] = acc / 9.0
+
+    out = bytearray(len(heights))
+    for y in range(TOTAL):
+        base = y * TOTAL
+        for x in range(TOTAL):
+            m = freedom_at(x - BORDER, y - BORDER)
+            v = heights[base + x] * (1.0 - m) + work[base + x] * m
+            out[base + x] = max(0, min(255, round(v)))
+    return out
 
 
 # ------------------------------------------------------------------ textures
@@ -120,35 +206,44 @@ def height_at(px, py):
 PALETTE = [
     ("SandMediumType5c", 16),      # 0 base sand
     ("SandType3wet", 4),           # 1 river bed
-    ("GrassMediumType22", 16),     # 2 green banks
+    ("GrassMediumType22", 16),     # 2 green banks + meadows
     ("SandLargeType4Grassy", 36),  # 3 oasis pockets
-    ("DirtMediumType12", 16),      # 4 road / scorched track
-    ("DirtMediumType13", 4),       # 5 shelves
+    ("DirtMediumType12", 16),      # 4 roads / high-road trails
+    ("DirtMediumType13", 4),       # 5 bridge pads
     ("CliffMediumType20", 16),     # 6 cliff faces
-    ("SandMediumType11", 16),      # 7 mountain tops
+    ("SandMediumType11", 16),      # 7 hill tops
     ("RocksType6", 4),             # 8 rim plateau
 ]
+TRAILS = [(56, 176, 226, 234), (56, 176, 166, 174),      # west arm trails
+          (224, 344, 226, 234), (224, 344, 166, 174)]    # east arm trails
 
 
-def texture_class_at(px, py, cell_heights):
-    """Palette index for a cell (before cliff override)."""
+def texture_class_at(px, py, cell_heights, oases, meadow):
+    """Palette index for a cell (cliff override first)."""
     h = cell_heights
     if max(h) - min(h) > 12:
         return 6                                   # cliff face
     if RIVER_BED[0] - 1 <= px < RIVER_BED[1] + 1:
         return 1
-    if RIVER_BANK[0] - 4 <= px < RIVER_BANK[1] + 4 and max(h) <= H_GROUND:
-        return 2                                   # green river banks
+    if RIVER_BANK[0] - 5 <= px < RIVER_BANK[1] + 5 and max(h) <= H_GROUND + 3:
+        return 2                                   # lush river banks
     edge = min(px, py, P - 1 - px, P - 1 - py) if 0 <= px < P and 0 <= py < P else -1
     if edge < 0 or edge < RIM_TOP:
         return 8                                   # rim / border
+    for x, y, _hh in PADS.values():
+        if math.hypot(px - x, py - y) < 7:
+            return 5                               # bridge pads
     if ROAD_Y[0] + 2 <= py < ROAD_Y[1] - 2 and CORRIDOR <= px < P - CORRIDOR:
         return 4                                   # the road bed
-    for rect, _h in SHELVES.values():
-        if in_rect(px, py, rect):
-            return 5
-    if min(h) >= H_BELT:
-        return 7                                   # mountain tops
+    if min(h) >= H_BELT - 6:
+        for rect in TRAILS:
+            if in_rect(px, py, rect):
+                return 4                           # trails along the high roads
+        return 7                                   # hill tops
+    if any((px - ox) ** 2 + (py - oy) ** 2 < r * r for ox, oy, r in oases):
+        return 3                                   # oasis pockets
+    if meadow(px, py):
+        return 2                                   # scattered green meadows
     return 0
 
 
@@ -162,6 +257,20 @@ def build_blend_tile(heights, oases):
         classes.append(TextureClass(acc, num, width, 0, name))
         acc += num
 
+    mrng = random.Random(23)
+    step = 16
+    gw = TOTAL // step + 2
+    mgrid = [mrng.random() for _ in range(gw * gw)]
+
+    def meadow(px, py):
+        x, y = px + BORDER, py + BORDER
+        gx, gy = x / step, y / step
+        ix, iy = int(gx), int(gy)
+        fx, fy = gx - ix, gy - iy
+        v = lerp(lerp(mgrid[iy * gw + ix], mgrid[iy * gw + ix + 1], fx),
+                 lerp(mgrid[(iy + 1) * gw + ix], mgrid[(iy + 1) * gw + ix + 1], fx), fy)
+        return v > 0.78
+
     tile = bytearray(TOTAL * TOTAL * 2)
     cliff_bits = bytearray(TOTAL * ((TOTAL + 7) // 8))
     for y in range(TOTAL):
@@ -171,10 +280,7 @@ def build_blend_tile(heights, oases):
                  heights[y * TOTAL + min(x + 1, TOTAL - 1)],
                  heights[min(y + 1, TOTAL - 1) * TOTAL + x],
                  heights[min(y + 1, TOTAL - 1) * TOTAL + min(x + 1, TOTAL - 1)])
-            cls = texture_class_at(px, py, h)
-            if cls == 0 and any((px - ox) ** 2 + (py - oy) ** 2 < r * r
-                                for ox, oy, r in oases):
-                cls = 3
+            cls = texture_class_at(px, py, h, oases, meadow)
             name, num = PALETTE[cls]
             width = int(math.isqrt(num))
             ndx = first[name] + (x // 2) % width + width * ((y // 2) % width)
@@ -247,11 +353,9 @@ def build_objects(factory, oases):
     rng = random.Random(1959)
     objs = []
 
-    # player starts (waypoints) in the valley hearts, toward their corridor
-    start_px = {"1": ("TL", 92, 308), "2": ("TR", 308, 308),
-                "3": ("BR", 308, 92), "4": ("BL", 92, 92)}
+    # player starts (waypoints) in the valley hearts
     wp_props = factory.find_props("*Waypoints/Waypoint")
-    for n, (_q, px, py) in start_px.items():
+    for n, (px, py) in START_PX.items():
         objs.append(factory.make(
             "*Waypoints/Waypoint", wu(px), wu(py), props=wp_props,
             drop=("waypointPathLabel1", "waypointPathLabel2",
@@ -259,28 +363,26 @@ def build_objects(factory, oases):
             extra=((f"waypointID", DICT_INT, int(n)),
                    ("waypointName", DICT_ASCIISTRING, f"Player_{n}_Start"))))
 
-    # economy: two supply docks per valley + a contested pile at road junctions
-    dock_offsets = ((-34, 18), (34, -18))
-    for _q, px, py in start_px.values():
-        for dx, dy in dock_offsets:
+    # economy: two supply docks per valley + contested piles at road junctions
+    for px, py in START_PX.values():
+        for dx, dy in DOCK_OFFSETS:
             objs.append(factory.make("SupplyDock", wu(px + dx), wu(py + dy),
                                      angle=rng.uniform(-3.14, 3.14)))
-    for jx in (28, P - 28):
-        for jy in (ROAD_Y[0] - 8, ROAD_Y[1] + 8):
-            objs.append(factory.make("SupplyPileSmall", wu(jx), wu(jy)))
+    for jx, jy in PILE_SPOTS:
+        objs.append(factory.make("SupplyPileSmall", wu(jx), wu(jy)))
 
-    # oil derricks guarding the road's river approaches (contested center)
+    # oil derricks up on the high roads (hold the heights, get paid)
     if factory.find_props("TechOilDerrick"):
-        for px, py in ((170, 178), (230, 222), (170, 222), (230, 178)):
+        for px, py in ((140, 230), (140, 170), (260, 230), (260, 170)):
             objs.append(factory.make("TechOilDerrick", wu(px), wu(py)))
 
-    # the three bridges: low road bridge + the two stacked diagonals
-    objs += factory.bridge("KandaharBridge",
-                           wu(RIVER_BANK[0] - 1), wu(C), wu(RIVER_BANK[1]), wu(C))
-    objs += factory.bridge("KandaharBridge",          # high: TL <-> BR (SE shelf)
-                           wu(184), wu(232), wu(216), wu(168))
-    objs += factory.bridge("KandaharBridge",          # low: BL <-> TR (NE shelf)
-                           wu(184), wu(168), wu(216), wu(232))
+    # THE X: stacked kitty-corner bridges over the river center
+    objs += factory.bridge("KandaharBridge",          # high deck: NW <-> SE
+                           wu(PADS["NW"][0]), wu(PADS["NW"][1]),
+                           wu(PADS["SE"][0]), wu(PADS["SE"][1]))
+    objs += factory.bridge("KandaharBridge",          # low deck: SW <-> NE
+                           wu(PADS["SW"][0]), wu(PADS["SW"][1]),
+                           wu(PADS["NE"][0]), wu(PADS["NE"][1]))
 
     # roads: center road + both edge corridors, in straight chained segments
     def chain(template, points):
@@ -295,7 +397,7 @@ def build_objects(factory, oases):
     chain("DirtRoad", [(28, y) for y in range(32, P - 31, 32)])
     chain("DirtRoad", [(P - 28, y) for y in range(32, P - 31, 32)])
 
-    # scenery: palm oases, green banks, rocks on shelves and rim
+    # scenery: palm oases, lush banks, rocks along the high roads
     palms = ["TreePalm1short", "TreePalm03", "TreePalm04", "TreePalm2",
              "TreePalm1", "TreePalm2short"]
     for ox, oy, r in oases:
@@ -308,21 +410,20 @@ def build_objects(factory, oases):
     for py in range(40, P - 39, 26):                 # palms along the banks
         if abs(py - C) > 24:
             objs.append(factory.make(rng.choice(palms),
-                                     wu(RIVER_BANK[0] - 3 - rng.uniform(0, 3)),
+                                     wu(RIVER_BANK[0] - 4 - rng.uniform(0, 3)),
                                      wu(py), angle=rng.uniform(-3.14, 3.14)))
             objs.append(factory.make(rng.choice(palms),
-                                     wu(RIVER_BANK[1] + 3 + rng.uniform(0, 3)),
+                                     wu(RIVER_BANK[1] + 4 + rng.uniform(0, 3)),
                                      wu(py + 13), angle=rng.uniform(-3.14, 3.14)))
-    for rect, _h in SHELVES.values():                # rocks on the shelves
-        x0, x1, y0, y1 = rect
-        for _ in range(3):
+    for x0, x1, y0, y1 in TRAILS:                    # rocks lining the trails
+        for _ in range(4):
             objs.append(factory.make("Rocks1Brown",
-                                     wu(rng.uniform(x0 + 3, x1 - 3)),
-                                     wu(rng.uniform(y0 + 3, y1 - 3)),
+                                     wu(rng.uniform(x0, x1)),
+                                     wu(rng.choice((y0 - 3, y1 + 3))),
                                      angle=rng.uniform(-3.14, 3.14)))
 
     # ambience
-    for _q, px, py in start_px.values():
+    for px, py in START_PX.values():
         objs.append(factory.make("Amb_DesertNatureWindThinLoop", wu(px), wu(py)))
     for py in (70, C, P - 70):
         objs.append(factory.make("Amb_WaterRiverLoop", wu(C), wu(py)))
@@ -334,14 +435,15 @@ def build_triggers():
         return [(int(wu(x0)), int(wu(y0)), z), (int(wu(x1)), int(wu(y0)), z),
                 (int(wu(x1)), int(wu(y1)), z), (int(wu(x0)), int(wu(y1)), z)]
 
-    triggers = [Trigger("River", "", 1, 1, 0, 0,
-                        rect_points(RIVER_BANK[0], RIVER_BANK[1], 2, P - 2,
-                                    WATER_Z)),
-                Trigger("CombatZone", "", 2, 0, 0, 0,
+    triggers = [Trigger("River", "", 1, 1, 0, 0,          # border to border
+                        rect_points(RIVER_BANK[0], RIVER_BANK[1],
+                                    -BORDER, P + BORDER, WATER_Z)),
+                Trigger("WaterTable", "", 2, 1, 0, 0,     # map-wide water plane
+                        rect_points(0, P, 0, P, 10)),
+                Trigger("CombatZone", "", 3, 0, 0, 0,
                         rect_points(120, 280, 120, 280))]
-    tid = 3
-    centers = {"1": (92, 308), "2": (308, 308), "3": (308, 92), "4": (92, 92)}
-    for n, (px, py) in centers.items():
+    tid = 4
+    for n, (px, py) in START_PX.items():
         triggers.append(Trigger(f"InnerPerimeter{n}", "", tid, 0, 0, 0,
                                 rect_points(px - 45, px + 45, py - 45, py + 45)))
         triggers.append(Trigger(f"OuterPerimeter{n}", "", tid + 1, 0, 0, 0,
@@ -360,6 +462,7 @@ def main():
     for y in range(TOTAL):
         for x in range(TOTAL):
             heights[y * TOTAL + x] = height_at(x - BORDER, y - BORDER)
+    heights = organic_pass(heights)          # noise + smoothing = sculpted hills
 
     oases = [(60, 276, 12), (340, 340, 12), (340, 124, 12), (60, 60, 12),
              (124, 340, 10), (276, 60, 10)]
