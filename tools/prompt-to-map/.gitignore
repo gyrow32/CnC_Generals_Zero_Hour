@@ -10,3 +10,6 @@ spike/out/
 __pycache__/
 *.pyc
 .pytest_cache/
+
+# Generated maps + previews (rebuildable via maps/build_*.py)
+maps/out/
