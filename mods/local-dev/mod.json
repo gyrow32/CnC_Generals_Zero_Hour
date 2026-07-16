@@ -1,0 +1,38 @@
+{
+  "name": "local-dev",
+  "description": "A visible, safe starter mod: skirmish games begin with $50,000.",
+  "basePatches": [
+    {
+      "archive": "INIZH.big",
+      "entry": "Data\\INI\\GameData.ini",
+      "encoding": "latin-1",
+      "replacements": [
+        {
+          "old": "DefaultStartingCash = 10000",
+          "new": "DefaultStartingCash = 50000",
+          "expectedCount": 1
+        },
+        {
+          "old": "MaxCameraHeight = 310.0",
+          "new": "MaxCameraHeight = 400.0",
+          "expectedCount": 1
+        },
+        {
+          "old": "CameraHeight = 232.0",
+          "new": "CameraHeight = 400.0",
+          "expectedCount": 1
+        }
+      ]
+    }
+  ],
+  "csfAdditions": [
+    {
+      "archive": "EnglishZH.big",
+      "entry": "Data\\English\\generals.csf",
+      "strings": {
+        "GUI:CustomMission": "Custom Mission",
+        "GUI:StartCustomMission": "Start Custom Mission"
+      }
+    }
+  ]
+}

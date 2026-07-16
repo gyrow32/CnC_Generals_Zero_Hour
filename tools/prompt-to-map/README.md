@@ -1,34 +1,56 @@
 # prompt-to-map
 
-Turn a natural-language prompt into a playable **Command & Conquer: Generals — Zero Hour** map.
+Turn a natural-language prompt into a playable **Command & Conquer: Generals — Zero Hour**
+map. The AI designs terrain, resources, structures, player starts, and balance, then writes
+a real `.map` file that the game and WorldBuilder can load.
 
-Claude (in a Claude Code session) is the generation engine: it designs the map and writes a
-real `.map` file the game loads. See the design spec:
-[`docs/superpowers/specs/2026-07-06-prompt-to-map-design.md`](../../docs/superpowers/specs/2026-07-06-prompt-to-map-design.md)
-and the byte-level format reference:
-[`docs/superpowers/specs/map-format-reference.md`](../../docs/superpowers/specs/map-format-reference.md).
+See the [design spec](../../docs/superpowers/specs/2026-07-06-prompt-to-map-design.md) and
+the [byte-level format reference](../../docs/superpowers/specs/map-format-reference.md).
 
 ## Status
 
-**Phase 0 (foundation) — in progress.** The `spike/` folder holds throwaway feasibility
-proofs (already validated against real retail maps: BIG extraction, RefPack decompression,
-DataChunk parsing). The real toolkit (`cncmap/`, `generator/`) is not built yet — it awaits
-the implementation plan.
+The binary map engine is working and covered by round-trip tests. Two generated maps,
+Scorched Crossing and Panorama Pass, are playable and editable in WorldBuilder. The next
+phase is turning their reusable terrain/content patterns into a general prompt-driven
+designer rather than one builder script per map.
 
-## Layout (planned)
+## AI-to-WorldBuilder workflow
 
+From the repository root:
+
+```powershell
+# Build one of the deterministic AI-designed maps.
+python .\tools\prompt-to-map\maps\build_panorama_pass.py
+
+# Validate it, install its bundle, and open it directly in WorldBuilder.
+powershell -NoProfile -ExecutionPolicy Bypass -File .\worldbuilder-local.ps1 -Map "Panorama Pass"
+
+# Unpack owned retail INI/maps and build an AI-friendly reference catalog.
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\local-dev\dev.ps1 -Action unpack
 ```
-cncmap/       file engine + map model (datachunk, refpack, mapfile, validate)
-generator/    the "designer": terrain, textures, content, balance
-tests/        round-trip tests against real fixtures
-spike/        throwaway feasibility proofs (reference only, not the real toolkit)
+
+`map_workflow.py` refuses maps missing required chunks or at least two unique player
+starts. It preserves a changed installed map under `.local/map-backups` before replacing
+it, carries along `map.str` and an existing thumbnail, and generates a thumbnail when
+one is missing.
+
+The ignored `.local/reference/reference-catalog.json` file inventories official map
+dimensions, player counts, object usage, object templates, and terrain textures. Extracted
+retail files remain under `.local/reference/archives` and are never committed.
+
+## Layout
+
+```text
+cncmap/               binary file engine and map object model
+maps/                 deterministic AI-authored map builders and generated output
+map_workflow.py       validation, safe installation, thumbnails, and backups
+reference_catalog.py  owned retail archive extraction and AI reference index
+tests/                round-trip, primitive, and workflow tests
+spike/                feasibility tools and renderers retained for reference
 ```
 
-## Reproduce the fixtures (needs the game installed locally)
+## Tests
 
-```bash
-# from repo root
-MAPS="/c/Program Files/EA Games/Command and Conquer Generals Zero Hour/Command and Conquer Generals Zero Hour/MapsZH.big"
-python tools/prompt-to-map/spike/big_extract.py "$MAPS" tools/prompt-to-map/tests/fixtures ".map" 6
-python tools/prompt-to-map/spike/datachunk_dump.py tools/prompt-to-map/tests/fixtures/Hovercraft.map
+```powershell
+python -m pytest .\tools\prompt-to-map\tests -q
 ```

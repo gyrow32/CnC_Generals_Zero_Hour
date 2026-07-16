@@ -540,8 +540,10 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message,
 			//-------------------------------------------------------------------------
 			case 0x020A: // WM_MOUSEWHEEL
 			{
-				long x = (long) LOWORD(lParam);
-				long y = (long) HIWORD(lParam);
+				// WM_MOUSEWHEEL supplies signed screen coordinates. Sign extension is
+				// required for monitors positioned left of or above the primary display.
+				long x = (long) (short) LOWORD(lParam);
+				long y = (long) (short) HIWORD(lParam);
 				RECT rect;
 
 				// ignore when outside of client area

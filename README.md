@@ -1,6 +1,81 @@
 
 # Command & Conquer Generals (inc. Zero Hour) Source Code
 
+## Local play and modding quick start
+
+This fork includes an isolated Windows development launcher. It uses the game data from
+an owned EA/Steam Zero Hour installation, but keeps the maintained executable and every
+generated mod under this repository's ignored `.local` directory. It does not replace
+the retail executable or disturb a GeneralsOnline installation.
+
+From PowerShell in the repository root:
+
+```powershell
+# Download the latest maintained Zero Hour runtime and verify the setup.
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\local-dev\dev.ps1 -Action setup
+
+# Build the sample mod and play it locally.
+# The visible proof is $50,000 starting cash in a skirmish match.
+# Play defaults to borderless 16:9 HD on the landscape monitor.
+powershell -NoProfile -ExecutionPolicy Bypass -File .\play-local.ps1
+
+# Play without any mod, or open the installed WorldBuilder.
+powershell -NoProfile -ExecutionPolicy Bypass -File .\play-local.ps1 -Vanilla
+powershell -NoProfile -ExecutionPolicy Bypass -File .\worldbuilder-local.ps1
+
+# Validate/install an AI-generated map and open it directly in WorldBuilder.
+powershell -NoProfile -ExecutionPolicy Bypass -File .\worldbuilder-local.ps1 -Map "Panorama Pass"
+```
+
+The launcher chooses the largest connected landscape display and defaults to borderless
+fullscreen there, ignoring portrait screens. Use `-Windowed -XRes 1600 -YRes 900` for a
+movable fixed-size development window, or `-Fullscreen` for legacy exclusive fullscreen.
+Do not externally maximize or resize a fixed-size game window: this legacy DirectX build
+does not recalculate mouse coordinates after an external resize.
+
+Edit [`mods/local-dev`](mods/local-dev) to develop the starter mod. Files below its
+`files` directory are packed using their relative game paths. For example,
+`files/Data/INI/Object/MyUnit.ini` becomes `Data\\INI\\Object\\MyUnit.ini` in the mod.
+`mod.json` can also copy a file from an owned retail BIG archive and apply exact text
+replacements at build time; this avoids checking copyrighted retail data into Git.
+
+The starter mod raises the default camera and camera ceiling to `400`, so a
+skirmish starts with a higher tactical view even when wheel input is unavailable.
+To choose another fixed height, change both camera-height replacements in
+`mods/local-dev/mod.json`, then launch again.
+
+Useful development commands:
+
+```powershell
+# Build without launching, then inspect the produced archive.
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\local-dev\dev.ps1 -Action build
+python .\tools\local-dev\big_archive.py list .\.local\mods\local-dev.big
+
+# Re-run dependency/runtime checks.
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\local-dev\dev.ps1 -Action check
+
+# Run the mod/archive and map-tool tests.
+python -m pytest .\tools\local-dev\tests .\tools\prompt-to-map\tests -q
+```
+
+Custom maps remain separate from gameplay mods. Put each map in its own folder under
+`Documents\Command and Conquer Generals Zero Hour Data\Maps`, or use the existing
+`tools/prompt-to-map` builders with `--install`.
+
+For AI map design, unpack the owned retail maps and INI definitions into the ignored
+local reference catalog. This gives the AI canonical object names, retail map layouts,
+terrain texture names, dimensions, player starts, and object counts without committing
+EA's assets:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\local-dev\dev.ps1 -Action unpack
+```
+
+The original EA source below still needs its historical proprietary SDK dependencies.
+The local launcher therefore uses a current game binary from the community-maintained
+[GeneralsGameCode project](https://github.com/TheSuperHackers/GeneralsGameCode/releases)
+and the retail WorldBuilder while preserving this source tree for engine work.
+
 This repository includes source code for Command & Conquer Generals, and its expansion pack Zero Hour. This release provides support to the Steam Workshop for both games ([C&C Generals](https://steamcommunity.com/workshop/browse/?appid=2229870) and [C&C Generals - Zero Hour](https://steamcommunity.com/workshop/browse/?appid=2732960)).
 
 
