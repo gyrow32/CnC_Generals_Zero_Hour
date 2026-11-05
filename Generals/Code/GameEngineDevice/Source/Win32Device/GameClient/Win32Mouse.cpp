@@ -236,9 +236,11 @@ void Win32Mouse::translateEvent( UnsignedInt eventIndex, MouseIO *result )
 		{
 			POINT p;
 
-			// translate the screen mouse position to be relative to the application window
-			p.x = LOWORD( lParam );
-			p.y = HIWORD( lParam );
+			// translate the screen mouse position to be relative to the application window.
+			// WM_MOUSEWHEEL supplies signed screen coordinates. Sign extension is required
+			// for monitors positioned left of or above the primary display.
+			p.x = (long) (short) LOWORD( lParam );
+			p.y = (long) (short) HIWORD( lParam );
 			ScreenToClient( ApplicationHWnd, &p );
 	
 			// note the short cast here to keep signed information in tact

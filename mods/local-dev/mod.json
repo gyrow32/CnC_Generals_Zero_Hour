@@ -14,7 +14,7 @@
         },
         {
           "old": "MaxCameraHeight = 310.0",
-          "new": "MaxCameraHeight = 400.0",
+          "new": "MaxCameraHeight = 600.0",
           "expectedCount": 1
         },
         {
